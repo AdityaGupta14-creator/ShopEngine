@@ -162,3 +162,121 @@ the number that matched: use `hasMore` to tell one match from several. Remember
 Per the competition rules: an abstract (max 500 words), a 3-minute demo video, your code
 repository with its outputs on `dev.jsonl` (`--log`), and the list of Rezolve Labs capabilities
 you used.
+
+## Demo HTTP Server (FastAPI)
+
+`server.py` exposes the agent via a high-performance FastAPI service designed for demo frontends. Search requests strictly route through the agent's `tools` object with the search counter fully preserved.
+
+### Run the Server
+
+```bash
+python server.py
+# or with uvicorn directly:
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+The server runs at `http://localhost:8000`. Interactive Swagger UI is available at `http://localhost:8000/docs`.
+
+---
+
+### Endpoints & `curl` Examples
+
+#### 1. Health Check
+Checks if the server is healthy and ready.
+
+```bash
+curl -X GET http://localhost:8000/health
+```
+
+**Response:**
+```json
+{"status": "ok"}
+```
+
+---
+
+#### 2. Start a New Session
+Initializes an isolated session state in memory and returns a unique `session_id`.
+
+```bash
+curl -X POST http://localhost:8000/session
+```
+
+**Response:**
+```json
+{"session_id": "session_a73a8256d85e"}
+```
+
+---
+
+#### 3. Observe Words (Streaming)
+Feeds words one at a time to the agent. Returns incrementally updated filters, confidence, commitment status, product metadata (when committed), and the search count so far.
+
+```bash
+curl -X POST http://localhost:8000/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "session_a73a8256d85e", "word": "running"}'
+```
+
+```bash
+curl -X POST http://localhost:8000/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "session_a73a8256d85e", "word": "shoes"}'
+```
+
+**Response:**
+```json
+{
+  "filters": {
+    "category": "running shoes",
+    "colour": "black",
+    "size": "9",
+    "brand": "Pacevo",
+    "max_price": 4000
+  },
+  "confidence": 0.8,
+  "commit": "P0063",
+  "product": {
+    "product_id": "P0063",
+    "title": "Pacevo Drift Running Shoes, Black",
+    "brand": "Pacevo",
+    "category": "running shoes",
+    "colour": "black",
+    "size": "9",
+    "price": 3899,
+    "description": "Drift running shoes by Pacevo in black. Light, breathable upper for tempo days."
+  },
+  "searches_so_far": 4
+}
+```
+
+*(Note: `commit` and `product` are `null` until the agent safely confirms a single unique match.)*
+
+---
+
+#### 4. Finish Session
+Signals that the shopper has finished speaking. Re-parses the entire utterance, finalizes the product choice, and reports the number of wasted searches.
+
+```bash
+curl -X POST http://localhost:8000/finish \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "session_a73a8256d85e"}'
+```
+
+**Response:**
+```json
+{
+  "final_product": {
+    "product_id": "P0063",
+    "title": "Pacevo Drift Running Shoes, Black",
+    "brand": "Pacevo",
+    "category": "running shoes",
+    "colour": "black",
+    "size": "9",
+    "price": 3899,
+    "description": "Drift running shoes by Pacevo in black. Light, breathable upper for tempo days."
+  },
+  "wasted_searches": 3
+}
+```
+
