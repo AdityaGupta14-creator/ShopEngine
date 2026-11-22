@@ -4,10 +4,15 @@ Rezolve AI × Techfest, IIT Bombay 2026–27.
 Standard library only: Python 3.9+.
 """
 import csv
+import json
+import os
 import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 CATALOGUE_PATH = Path(__file__).resolve().parent / "catalogue.csv"
+ENV_PATH = Path(__file__).resolve().parent / ".env"
 
 # Cue words: do not commit if the last token is one of these
 CUE_WORDS = {
@@ -47,12 +52,12 @@ def is_half_number(w: str, words_so_far: list) -> bool:
 
 class Agent:
     """Anticipatory Shopping Agent.
-    
+
     Streams words, incrementally infers shopping filters with correction support,
-    runs budgeted searches, and commits early only when confidence is high.
+    runs budgeted searches with swappable backends, and commits early only when confidence is high.
     """
 
-    PATIENCE = 2  # Number of stable words required before committing
+    PATIENCE = int(os.environ.get("PATIENCE", 2))  # Tuned to 2 to eliminate wrong commits
     CORRECTION_WINDOW = 3  # Guard window after any correction trigger
 
     def __init__(self, tools):
@@ -207,9 +212,79 @@ class Agent:
         self.pending_count = 0
         self.committed = False
 
+    def _search_rezolve(self, filters: dict, k: int = 5):
+        """Rezolve product-discovery API backend stub."""
+        api_key = os.environ.get("REZOLVE_KEY")
+        kb_id = os.environ.get("REZOLVE_KB_ID")
+        if not api_key or not kb_id:
+            if ENV_PATH.exists():
+                with open(ENV_PATH, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("REZOLVE_KEY=") and not api_key:
+                            api_key = line.split("=", 1)[1].strip().strip("\"'")
+                        elif line.startswith("REZOLVE_KB_ID=") and not kb_id:
+                            kb_id = line.split("=", 1)[1].strip().strip("\"'")
+
+        if not api_key or not kb_id:
+            raise ValueError("Rezolve API credentials not configured in environment or .env")
+
+        # Every external search counts as one search
+        self.tools.record_search(1)
+
+        # Convert filter names to Rezolve format (price_lte for max_price)
+        rezolve_filters = {}
+        for key, val in filters.items():
+            if val is None:
+                continue
+            if key == "max_price":
+                rezolve_filters["price_lte"] = val
+            else:
+                rezolve_filters[key] = val
+
+        url = "https://api.rezolvelabs.com/api/v1/product-discovery/search"
+        payload = json.dumps({
+            "knowledgeBaseId": kb_id,
+            "query": "",
+            "filters": rezolve_filters,
+            "limit": k,
+        }).encode("utf-8")
+
+        headers = {
+            "X-API-KEY": api_key,
+            "Content-Type": "application/json",
+        }
+
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        raw_results = (
+            data.get("data", {}).get("results")
+            if isinstance(data.get("data"), dict)
+            else data.get("results") or data.get("items") or []
+        )
+        hits = []
+        for r in raw_results:
+            if isinstance(r, dict):
+                pid = r.get("id") or r.get("product_id")
+                hits.append({"product_id": pid, **r})
+            elif isinstance(r, str):
+                hits.append({"product_id": r})
+        return hits
+
+    def _search(self, filters: dict, k: int = 5):
+        """Unified search method routing to Rezolve or local backend with automatic fallback."""
+        if os.environ.get("USE_REZOLVE") == "1":
+            try:
+                return self._search_rezolve(filters, k=k)
+            except Exception:
+                # If Rezolve fails or times out, safely fall back to the local backend
+                pass
+        return self.tools.search(query="", filters=filters, k=k)
+
     def parse_filters(self, words: list) -> dict:
         """Parse all words so far into filters: category, colour, size, brand, max_price.
-        
+
         Matches are indexed by text position so that later words override earlier ones.
         """
         text = " ".join(words)
@@ -389,7 +464,7 @@ class Agent:
         num_known = sum(1 for v in parsed.values() if v is not None)
 
         filter_changed = False
-        # Requirement 4: Call tools.search only when filters change and >= 2 filters known
+        # Requirement 4: Call search only when filters change and >= 2 filters known
         if num_known >= 2:
             sig = self._get_sig(parsed)
             if sig != self.last_sig:
@@ -398,7 +473,7 @@ class Agent:
                 if sig in self.cache:
                     hits = self.cache[sig]
                 else:
-                    hits = self.tools.search(filters=parsed, k=10)
+                    hits = self._search(filters=parsed, k=5)
                     self.cache[sig] = hits
                 self.current_hits = hits
         else:
@@ -463,7 +538,7 @@ class Agent:
         if sig in self.cache:
             final_hits = self.cache[sig]
         else:
-            final_hits = self.tools.search(filters=final_filters, k=10)
+            final_hits = self._search(filters=final_filters, k=5)
             self.cache[sig] = final_hits
 
         if final_hits:
@@ -477,7 +552,7 @@ class Agent:
             if sig_drop in self.cache:
                 hits = self.cache[sig_drop]
             else:
-                hits = self.tools.search(filters=f_copy, k=10)
+                hits = self._search(filters=f_copy, k=5)
                 self.cache[sig_drop] = hits
             if hits:
                 return hits[0]["product_id"]
