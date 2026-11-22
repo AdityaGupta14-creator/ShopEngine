@@ -14,13 +14,12 @@ from pathlib import Path
 CATALOGUE_PATH = Path(__file__).resolve().parent / "catalogue.csv"
 ENV_PATH = Path(__file__).resolve().parent / ".env"
 
-# Cue words: do not commit if the last token is one of these
+# Filter-introducing cue words: do not commit if the last token introduces an unfinished filter
 CUE_WORDS = {
     "size", "uk", "waist", "number",
     "under", "below", "within", "budget", "max", "up", "to", "not", "more", "than", "less",
     "tak", "se", "kam", "ke", "andar", "rs", "rupees", "inr",
-    "in", "by", "from", "for", "only", "brand", "color", "colour",
-    "and", "or", "also", "with", "but", "uh", "um", "like"
+    "brand", "color", "colour"
 }
 
 # Words indicating a correction or hesitation
@@ -455,6 +454,13 @@ class Agent:
     def _get_sig(self, filters: dict):
         return tuple(sorted((k, str(v).lower()) for k, v in filters.items() if v is not None))
 
+    def _can_search(self, parsed: dict, num_known: int) -> bool:
+        """Search pruning: search only when a newly set filter can plausibly yield a unique match."""
+        if num_known < 2:
+            return False
+        # Plausible uniqueness: 3+ filters, or size/max_price arrival (high selectivity)
+        return (num_known >= 3) or (parsed.get("size") is not None) or (parsed.get("max_price") is not None)
+
     def observe(self, word: str):
         """One more word arrives."""
         self.words.append(word)
@@ -464,8 +470,8 @@ class Agent:
         num_known = sum(1 for v in parsed.values() if v is not None)
 
         filter_changed = False
-        # Requirement 4: Call search only when filters change and >= 2 filters known
-        if num_known >= 2:
+        # Requirement 4 & 3: Budgeted search with specificity pruning and signature caching
+        if self._can_search(parsed, num_known):
             sig = self._get_sig(parsed)
             if sig != self.last_sig:
                 self.last_sig = sig
@@ -476,7 +482,7 @@ class Agent:
                     hits = self._search(filters=parsed, k=5)
                     self.cache[sig] = hits
                 self.current_hits = hits
-        else:
+        elif num_known < 2:
             self.current_hits = []
 
         # Check if recent words indicate an ongoing correction
