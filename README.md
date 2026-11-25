@@ -1,6 +1,6 @@
 # Anticipatory Commerce: starter kit
 
-Rezolve AI × Techfest, IIT Bombay 2026–27, Problem Statement 1.
+Techfest, IIT Bombay 2026–27, Problem Statement 1.
 
 A shopping request arrives one word at a time: *"black running shoes, size nine, under two
 thousand…"*. Build an agent that predicts the shopper's filters from the words so far, searches
@@ -84,8 +84,7 @@ Every search counts, wherever it runs:
 
 - `tools.search(query="", filters=None, k=10)` runs `search.search` over the local catalogue and
   counts one search.
-- `tools.record_search(n=1)` counts searches you ran elsewhere, for example with Rezolve Labs
-  product search. Call it once per call you make.
+- `tools.record_search(n=1)` counts searches you ran elsewhere. Call it once per call you make.
 
 Treat the catalogue as a remote store: read `catalogue.csv` as much as you like to build
 vocabularies or train models, but at run time look products up through searches you count.
@@ -114,54 +113,10 @@ The baseline scores **20.0** on `dev.jsonl` (accuracy 0.527, no early commits). 
 of the reference baseline on the hidden set are not shortlisted. The weights above are proposals
 and may be tuned before the competition opens; the script is the source of truth.
 
-## Rezolve Labs
-
-Your solution must use at least one Rezolve Labs capability; list them in your architecture
-note. Each team gets a credit coupon for its Labs account. Useful here:
-
-- **Managed knowledge retrieval** holds your catalogue: upload `catalogue.csv` as it is.
-- **Semantic product search** searches it by meaning, with filters on any column. One credit
-  per search. It can serve the early searches on a partial request, and understands words the
-  local search does not.
-- **Conversational product finder**: the same search as a tool an agent calls mid-conversation.
-- **Live transcription** (stretch goal): stream audio over a WebSocket for a voice demo.
-
-Loading the catalogue takes three calls (send your key in `X-API-KEY`):
-
-```bash
-API=https://api.rezolvelabs.com/api/v1
-
-# 1. create a knowledge base; keep data.id
-curl -s -X POST $API/developer-platform/knowledge-bases -H "X-API-KEY: $KEY" \
-  -H 'Content-Type: application/json' -d '{"name": "PS1 catalogue"}'
-
-# 2. upload the catalogue; keep data.id (the document)
-curl -s -X POST $API/developer-platform/knowledge-bases/$KB/documents -H "X-API-KEY: $KEY" \
-  -F file=@catalogue.csv
-
-# 3. poll until status is "ready" (about 10 seconds); availableFilters lists the columns
-curl -s $API/developer-platform/knowledge-bases/$KB/documents/$DOC -H "X-API-KEY: $KEY"
-```
-
-Then search:
-
-```bash
-curl -s -X POST $API/product-discovery/search -H "X-API-KEY: $KEY" -H 'Content-Type: application/json' \
-  -d '{"knowledgeBaseId": "'$KB'", "query": "black running shoes",
-       "filters": {"category": "running shoes", "colour": "black", "size": "9", "price_lte": 4000},
-       "limit": 5}'
-```
-
-Each result's `id` is the catalogue's `product_id`. A plain filter value means equals; ranges use
-`_gte`, `_lte`, `_gt`, `_lt` (`price_lte`). `hitCount` is the number of results returned, not
-the number that matched: use `hasMore` to tell one match from several. Remember
-`tools.record_search()` for every call.
-
 ## Submitting
 
-Per the competition rules: an abstract (max 500 words), a 3-minute demo video, your code
-repository with its outputs on `dev.jsonl` (`--log`), and the list of Rezolve Labs capabilities
-you used.
+Per the competition rules: an abstract (max 500 words), a 3-minute demo video, and your code
+repository with its outputs on `dev.jsonl` (`--log`).
 
 ## Demo HTTP Server (FastAPI)
 

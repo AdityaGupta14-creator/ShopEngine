@@ -1,18 +1,14 @@
 """Anticipatory Commerce Agent for AgentX Challenge 1.
 
-Rezolve AI × Techfest, IIT Bombay 2026–27.
+Techfest, IIT Bombay 2026–27.
 Standard library only: Python 3.9+.
 """
 import csv
-import json
 import os
 import re
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 CATALOGUE_PATH = Path(__file__).resolve().parent / "catalogue.csv"
-ENV_PATH = Path(__file__).resolve().parent / ".env"
 
 # Filter-introducing cue words: do not commit if the last token introduces an unfinished filter
 CUE_WORDS = {
@@ -211,74 +207,8 @@ class Agent:
         self.pending_count = 0
         self.committed = False
 
-    def _search_rezolve(self, filters: dict, k: int = 5):
-        """Rezolve product-discovery API backend stub."""
-        api_key = os.environ.get("REZOLVE_KEY")
-        kb_id = os.environ.get("REZOLVE_KB_ID")
-        if not api_key or not kb_id:
-            if ENV_PATH.exists():
-                with open(ENV_PATH, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.startswith("REZOLVE_KEY=") and not api_key:
-                            api_key = line.split("=", 1)[1].strip().strip("\"'")
-                        elif line.startswith("REZOLVE_KB_ID=") and not kb_id:
-                            kb_id = line.split("=", 1)[1].strip().strip("\"'")
-
-        if not api_key or not kb_id:
-            raise ValueError("Rezolve API credentials not configured in environment or .env")
-
-        # Every external search counts as one search
-        self.tools.record_search(1)
-
-        # Convert filter names to Rezolve format (price_lte for max_price)
-        rezolve_filters = {}
-        for key, val in filters.items():
-            if val is None:
-                continue
-            if key == "max_price":
-                rezolve_filters["price_lte"] = val
-            else:
-                rezolve_filters[key] = val
-
-        url = "https://api.rezolvelabs.com/api/v1/product-discovery/search"
-        payload = json.dumps({
-            "knowledgeBaseId": kb_id,
-            "query": "",
-            "filters": rezolve_filters,
-            "limit": k,
-        }).encode("utf-8")
-
-        headers = {
-            "X-API-KEY": api_key,
-            "Content-Type": "application/json",
-        }
-
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-
-        raw_results = (
-            data.get("data", {}).get("results")
-            if isinstance(data.get("data"), dict)
-            else data.get("results") or data.get("items") or []
-        )
-        hits = []
-        for r in raw_results:
-            if isinstance(r, dict):
-                pid = r.get("id") or r.get("product_id")
-                hits.append({"product_id": pid, **r})
-            elif isinstance(r, str):
-                hits.append({"product_id": r})
-        return hits
-
     def _search(self, filters: dict, k: int = 5):
-        """Unified search method routing to Rezolve or local backend with automatic fallback."""
-        if os.environ.get("USE_REZOLVE") == "1":
-            try:
-                return self._search_rezolve(filters, k=k)
-            except Exception:
-                # If Rezolve fails or times out, safely fall back to the local backend
-                pass
+        """Search catalogue using tools.search."""
         return self.tools.search(query="", filters=filters, k=k)
 
     def parse_filters(self, words: list) -> dict:
