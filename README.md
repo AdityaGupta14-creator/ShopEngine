@@ -125,9 +125,9 @@ repository with its outputs on `dev.jsonl` (`--log`).
 ### Run the Server
 
 ```bash
-python server.py
-# or with uvicorn directly:
-uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn server:app --port 8000
+# or with auto-reload:
+uvicorn server:app --port 8000 --reload
 ```
 
 The server runs at `http://localhost:8000`. Interactive Swagger UI is available at `http://localhost:8000/docs`.
@@ -150,7 +150,28 @@ curl -X GET http://localhost:8000/health
 
 ---
 
-#### 2. Start a New Session
+#### 2. Get Example Utterances
+Retrieves 6 curated sample shopping requests represented as arrays of words for frontend demos (including plain, correction, late constraint, and Hindi-English examples).
+
+```bash
+curl -X GET http://localhost:8000/examples
+```
+
+**Response:**
+```json
+[
+  ["I", "need", "green", "running", "shoes", "from", "Strydo", "size", "9", "under", "6000"],
+  ["black", "running", "shoes,", "no", "wait,", "white,", "from", "Pacevo", "size", "10"],
+  ["Can", "you", "show", "me", "a", "navy", "hoodie", "by", "Urbanyx,", "and", "make", "sure", "it", "is", "size", "S"],
+  ["Bhaiya", "mujhe", "Strydo", "ke", "green", "running", "shoes", "dikhao", "8", "number", "6000", "se", "kam"],
+  ["Find", "me", "a", "black", "pair", "of", "jeans", "from", "Tanaro", "waist", "32", "under", "2500"],
+  ["Show", "me", "a", "blue", "wrist", "watch", "from", "Tikkra", "budget", "5k"]
+]
+```
+
+---
+
+#### 3. Start a New Session
 Initializes an isolated session state in memory and returns a unique `session_id`.
 
 ```bash
@@ -164,8 +185,14 @@ curl -X POST http://localhost:8000/session
 
 ---
 
-#### 3. Observe Words (Streaming)
-Feeds words one at a time to the agent. Returns incrementally updated filters, confidence, commitment status, product metadata (when committed), and the search count so far.
+#### 4. Observe Words (Streaming)
+Feeds words one at a time to the agent. Returns incrementally updated filters, confidence, commitment status, product metadata (when committed), words streamed so far, and the search count so far.
+
+```bash
+curl -X POST http://localhost:8000/observe \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "session_a73a8256d85e", "word": "green"}'
+```
 
 ```bash
 curl -X POST http://localhost:8000/observe \
@@ -173,35 +200,30 @@ curl -X POST http://localhost:8000/observe \
   -d '{"session_id": "session_a73a8256d85e", "word": "running"}'
 ```
 
-```bash
-curl -X POST http://localhost:8000/observe \
-  -H "Content-Type: application/json" \
-  -d '{"session_id": "session_a73a8256d85e", "word": "shoes"}'
-```
-
 **Response:**
 ```json
 {
   "filters": {
     "category": "running shoes",
-    "colour": "black",
+    "colour": "green",
     "size": "9",
-    "brand": "Pacevo",
-    "max_price": 4000
+    "brand": "Strydo",
+    "max_price": 6000
   },
   "confidence": 0.8,
-  "commit": "P0063",
+  "commit": "P0003",
   "product": {
-    "product_id": "P0063",
-    "title": "Pacevo Drift Running Shoes, Black",
-    "brand": "Pacevo",
+    "product_id": "P0003",
+    "title": "Strydo Velocity Running Shoes, Green",
+    "brand": "Strydo",
     "category": "running shoes",
-    "colour": "black",
+    "colour": "green",
     "size": "9",
-    "price": 3899,
-    "description": "Drift running shoes by Pacevo in black. Light, breathable upper for tempo days."
+    "price": 5599,
+    "description": "Lightweight road runner by Strydo in striking green."
   },
-  "searches_so_far": 4
+  "words_so_far": ["I", "need", "green", "running", "shoes", "from", "Strydo", "size", "9", "under", "6000"],
+  "searches_so_far": 2
 }
 ```
 
@@ -209,8 +231,8 @@ curl -X POST http://localhost:8000/observe \
 
 ---
 
-#### 4. Finish Session
-Signals that the shopper has finished speaking. Re-parses the entire utterance, finalizes the product choice, and reports the number of wasted searches.
+#### 5. Finish Session
+Signals that the shopper has finished speaking. Finalizes the product choice, and reports the number of wasted searches.
 
 ```bash
 curl -X POST http://localhost:8000/finish \
@@ -222,16 +244,16 @@ curl -X POST http://localhost:8000/finish \
 ```json
 {
   "final_product": {
-    "product_id": "P0063",
-    "title": "Pacevo Drift Running Shoes, Black",
-    "brand": "Pacevo",
+    "product_id": "P0003",
+    "title": "Strydo Velocity Running Shoes, Green",
+    "brand": "Strydo",
     "category": "running shoes",
-    "colour": "black",
+    "colour": "green",
     "size": "9",
-    "price": 3899,
-    "description": "Drift running shoes by Pacevo in black. Light, breathable upper for tempo days."
+    "price": 5599,
+    "description": "Lightweight road runner by Strydo in striking green."
   },
-  "wasted_searches": 3
+  "wasted_searches": 1
 }
 ```
 

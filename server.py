@@ -6,7 +6,7 @@ observation, commitment detection, and session completion.
 import csv
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,8 +24,16 @@ def load_catalogue_lookup() -> Dict[str, Dict[str, Any]]:
     with open(CATALOGUE_PATH, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            row["price"] = int(row["price"])
-            lookup[row["product_id"]] = row
+            lookup[row["product_id"]] = {
+                "product_id": row["product_id"],
+                "title": row["title"],
+                "brand": row["brand"],
+                "category": row["category"],
+                "colour": row["colour"],
+                "size": row["size"],
+                "price": int(row["price"]),
+                "description": row["description"],
+            }
     return lookup
 
 
@@ -88,11 +96,23 @@ class ObserveRequest(BaseModel):
     word: str = Field(..., description="Word streamed to the agent")
 
 
+class ProductInfo(BaseModel):
+    product_id: str
+    title: str
+    brand: str
+    category: str
+    colour: str
+    size: str
+    price: int
+    description: str
+
+
 class ObserveResponse(BaseModel):
     filters: Dict[str, Any]
     confidence: float
     commit: Optional[str] = None
-    product: Optional[Dict[str, Any]] = None
+    product: Optional[ProductInfo] = None
+    words_so_far: List[str]
     searches_so_far: int
 
 
@@ -101,12 +121,24 @@ class FinishRequest(BaseModel):
 
 
 class FinishResponse(BaseModel):
-    final_product: Optional[Dict[str, Any]] = None
+    final_product: Optional[ProductInfo] = None
     wasted_searches: int
 
 
 class HealthResponse(BaseModel):
     status: str
+
+
+# 6 Curated Example Requests (Arrays of Words)
+# Covers: Plain, Correction, Late Constraint, Hindi-English, Apparel & Accessories
+EXAMPLES: List[List[str]] = [
+    ["I", "need", "green", "running", "shoes", "from", "Strydo", "size", "9", "under", "6000"],
+    ["black", "running", "shoes,", "no", "wait,", "white,", "from", "Pacevo", "size", "10"],
+    ["Can", "you", "show", "me", "a", "navy", "hoodie", "by", "Urbanyx,", "and", "make", "sure", "it", "is", "size", "S"],
+    ["Bhaiya", "mujhe", "Strydo", "ke", "green", "running", "shoes", "dikhao", "8", "number", "6000", "se", "kam"],
+    ["Find", "me", "a", "black", "pair", "of", "jeans", "from", "Tanaro", "waist", "32", "under", "2500"],
+    ["Show", "me", "a", "blue", "wrist", "watch", "from", "Tikkra", "budget", "5k"],
+]
 
 
 # --- Endpoints ---
@@ -116,6 +148,12 @@ class HealthResponse(BaseModel):
 def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/examples", response_model=List[List[str]])
+def get_examples():
+    """Return 6 sample shopping utterances as word arrays."""
+    return EXAMPLES
 
 
 @app.post("/session", response_model=SessionResponse)
@@ -128,7 +166,7 @@ def create_session():
 
 @app.post("/observe", response_model=ObserveResponse)
 def observe_word(req: ObserveRequest):
-    """Feed one more word to the agent and receive current filters, commit status, and searches."""
+    """Feed one more word to the agent and receive current filters, commit status, product metadata, and searches."""
     session = sessions.get(req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -142,7 +180,7 @@ def observe_word(req: ObserveRequest):
         session.committed_product_id = commit_id
         product_meta = CATALOGUE.get(commit_id)
     elif session.committed_product_id:
-        # Keep product info available if already committed
+        # Keep product info available once committed
         commit_id = session.committed_product_id
         product_meta = CATALOGUE.get(commit_id)
 
@@ -151,6 +189,7 @@ def observe_word(req: ObserveRequest):
         "confidence": out.get("confidence", 0.0),
         "commit": commit_id,
         "product": product_meta,
+        "words_so_far": session.agent.words,
         "searches_so_far": session.tools.searches,
     }
 
