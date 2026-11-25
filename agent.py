@@ -12,10 +12,10 @@ CATALOGUE_PATH = Path(__file__).resolve().parent / "catalogue.csv"
 
 # Filter-introducing cue words: do not commit if the last token introduces an unfinished filter
 CUE_WORDS = {
-    "size", "uk", "waist", "number",
+    "size", "waist", "number",
     "under", "below", "within", "budget", "max", "up", "to", "not", "more", "than", "less",
     "tak", "se", "kam", "ke", "andar", "rs", "rupees", "inr",
-    "brand", "color", "colour"
+    "color", "colour"
 }
 
 # Words indicating a correction or hesitation
@@ -40,7 +40,9 @@ def is_half_number(w: str, words_so_far: list) -> bool:
     if len(words_so_far) >= 2:
         prev = words_so_far[-2].lower().strip(".,!?;:\"'")
         if prev in ("under", "below", "within", "budget", "max", "to", "than", "less", "kam"):
-            if clean_w in HALF_NUMBERS or clean_w.isdigit():
+            if clean_w.isdigit():
+                return int(clean_w) < 100
+            if clean_w in HALF_NUMBERS:
                 return True
     return False
 
@@ -49,10 +51,10 @@ class Agent:
     """Anticipatory Shopping Agent.
 
     Streams words, incrementally infers shopping filters with correction support,
-    runs budgeted searches with swappable backends, and commits early only when confidence is high.
+    runs budgeted searches via tools.search, and commits early only when confidence is high.
     """
 
-    PATIENCE = int(os.environ.get("PATIENCE", 2))  # Tuned to 2 to eliminate wrong commits
+    PATIENCE = 2  # Tuned to 2 to eliminate wrong commits
     CORRECTION_WINDOW = 3  # Guard window after any correction trigger
 
     def __init__(self, tools):
@@ -385,11 +387,8 @@ class Agent:
         return tuple(sorted((k, str(v).lower()) for k, v in filters.items() if v is not None))
 
     def _can_search(self, parsed: dict, num_known: int) -> bool:
-        """Search pruning: search only when a newly set filter can plausibly yield a unique match."""
-        if num_known < 2:
-            return False
-        # Plausible uniqueness: 3+ filters, or size/max_price arrival (high selectivity)
-        return (num_known >= 3) or (parsed.get("size") is not None) or (parsed.get("max_price") is not None)
+        """Search pruning: search only when at least 3 filters are known."""
+        return num_known >= 3
 
     def observe(self, word: str):
         """One more word arrives."""
@@ -412,7 +411,7 @@ class Agent:
                     hits = self._search(filters=parsed, k=5)
                     self.cache[sig] = hits
                 self.current_hits = hits
-        elif num_known < 2:
+        else:
             self.current_hits = []
 
         # Check if recent words indicate an ongoing correction
